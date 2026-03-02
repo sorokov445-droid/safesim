@@ -194,6 +194,7 @@
       // -----------------------------
       let WIDTH = 0, HEIGHT = 0, uiScale = 1;
       const SAFE_SCENE_SCALE = 0.55;
+      const MOBILE_VISUAL_BOOST = 1.18; // увеличение сейфа/текстов/полей на мобиле (кнопки не трогаем)
 
       function S(v) {
         return Math.max(1, Math.round(v * uiScale));
@@ -214,11 +215,6 @@
         WIDTH = rectW;
         HEIGHT = rectH;
         uiScale = Math.min(WIDTH / BASE_W, HEIGHT / BASE_H);
-
-        // Мобилки любят делать всё мельче, чем нужно, поэтому слегка усиливаем масштаб канваса.
-        const isMobile = window.matchMedia("(pointer:coarse)").matches || Math.min(WIDTH, HEIGHT) < 700;
-        const uiBoost = isMobile ? 1.18 : 1.0;
-        uiScale *= uiBoost;
 
         rebuildBgPattern();
       }
@@ -558,6 +554,8 @@
       }
 
       function drawSafe(centerX, centerY, doorOpenAmount, secretOpenAmount, shakeX = 0) {
+        const isMobileLike = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+        const sceneBoost = isMobileLike ? MOBILE_VISUAL_BOOST : 1;
         if (!assets.safe || !assets.door || !assets.handle || !assets.dial || !assets.pendant) {
           drawFallbackSafe(centerX + shakeX, centerY);
           return;
@@ -566,14 +564,14 @@
         const cx = centerX + shakeX;
         const cy = centerY;
 
-        const safeW = Math.round(S(840) * SAFE_SCENE_SCALE);
-        const safeH = Math.round(S(840) * SAFE_SCENE_SCALE);
+        const safeW = Math.round(S(840) * SAFE_SCENE_SCALE * sceneBoost);
+        const safeH = Math.round(S(840) * SAFE_SCENE_SCALE * sceneBoost);
         const doorW0 = safeW;
         const doorH0 = safeH;
-        const handleW0 = Math.round(S(240) * SAFE_SCENE_SCALE);
-        const handleH0 = Math.round(S(240) * SAFE_SCENE_SCALE);
-        const dialW0 = Math.round(S(170) * SAFE_SCENE_SCALE);
-        const dialH0 = Math.round(S(170) * SAFE_SCENE_SCALE);
+        const handleW0 = Math.round(S(240) * SAFE_SCENE_SCALE * sceneBoost);
+        const handleH0 = Math.round(S(240) * SAFE_SCENE_SCALE * sceneBoost);
+        const dialW0 = Math.round(S(170) * SAFE_SCENE_SCALE * sceneBoost);
+        const dialH0 = Math.round(S(170) * SAFE_SCENE_SCALE * sceneBoost);
 
         const bx = Math.round(cx - safeW / 2);
         const by = Math.round(cy - safeH / 2);
@@ -939,18 +937,20 @@
 
         const isMobileLike = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
         // Подняли нижний UI выше, чтобы был над экранной клавиатурой
-        const mobilePadOffset = isMobileLike ? S(320) : 0;
+        const mobilePadOffset = isMobileLike ? S(360) : 0;
         // Подняли сейф отдельно (функционал проверки без ассетов тоже виден)
-        const mobileSafeLift = isMobileLike ? S(150) : 0;
+        const mobileSafeLift = isMobileLike ? S(195) : 0;
+        const V = (v) => isMobileLike ? Math.max(1, Math.round(S(v) * MOBILE_VISUAL_BOOST)) : S(v);
+        const visualScale = isMobileLike ? MOBILE_VISUAL_BOOST : 1;
 
         // Верхняя панель
         const topRect = { x: S(40), y: S(26), w: WIDTH - S(80), h: S(84) };
-        drawPixelFrame(topRect.x, topRect.y, topRect.w, topRect.h, COLORS.PANEL_A, COLORS.PANEL_B, COLORS.PANEL_C, S(4));
+        drawPixelFrame(topRect.x, topRect.y, topRect.w, topRect.h, COLORS.PANEL_A, COLORS.PANEL_B, COLORS.PANEL_C, V(4));
 
         const titleY = topRect.y + Math.round(topRect.h * 0.32);
         const msgY = topRect.y + Math.round(topRect.h * 0.70);
-        drawText("СИМУЛЯТОР СЕЙФА", WIDTH / 2, titleY, COLORS.ACCENT, S(28), "center", "700");
-        drawText(message, WIDTH / 2, msgY, messageColor, S(18), "center", "700");
+        drawText("СИМУЛЯТОР СЕЙФА", WIDTH / 2, titleY, COLORS.ACCENT, V(28), "center", "700");
+        drawText(message, WIDTH / 2, msgY, messageColor, V(18), "center", "700");
 
         // Shake
         let shakeX = 0;
@@ -976,12 +976,12 @@
 
         // Нижние элементы (подняты над mobile keypad)
         const codeBox = {
-          x: WIDTH / 2 - S(245),
-          y: HEIGHT - S(106) - mobilePadOffset,
-          w: S(490),
-          h: S(46)
+          x: WIDTH / 2 - V(245),
+          y: HEIGHT - V(106) - mobilePadOffset,
+          w: V(490),
+          h: V(46)
         };
-        drawPixelFrame(codeBox.x, codeBox.y, codeBox.w, codeBox.h, "#20242e", "#505868", "#12141b", S(4));
+        drawPixelFrame(codeBox.x, codeBox.y, codeBox.w, codeBox.h, "#20242e", "#505868", "#12141b", V(4));
 
         let visible, color;
         if (appState === STATE.SET_MAIN) {
@@ -994,17 +994,17 @@
           visible = "CODE:       " + maskedDigits(entered);
           color = COLORS.TEXT;
         }
-        drawText(visible, WIDTH / 2, HEIGHT - S(83) - mobilePadOffset, color, S(28), "center", "700");
+        drawText(visible, WIDTH / 2, HEIGHT - V(83) - mobilePadOffset, color, V(28), "center", "700");
 
         const hint = "Enter: подтвердить | Backspace: удалить | 1990/1991: режимы смены кода | R: сброс UI";
         if (!isMobileLike) {
-          drawText(hint, WIDTH / 2, HEIGHT - S(30), COLORS.DIM, S(14), "center", "700");
+          drawText(hint, WIDTH / 2, HEIGHT - V(30), COLORS.DIM, V(14), "center", "700");
         }
 
         if (appState === STATE.OPEN) {
-          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset, COLORS.TEXT, S(20), "center", "700");
+          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, HEIGHT - V(132) - mobilePadOffset, COLORS.TEXT, V(20), "center", "700");
         } else if (appState === STATE.SECRET_OPEN) {
-          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset, COLORS.TEXT, S(20), "center", "700");
+          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, HEIGHT - V(132) - mobilePadOffset, COLORS.TEXT, V(20), "center", "700");
         }
       }
 
