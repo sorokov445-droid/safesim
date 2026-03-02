@@ -934,9 +934,9 @@
 
         const isMobileLike = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
         // Подняли нижний UI выше, чтобы был над экранной клавиатурой
-        const mobilePadOffset = isMobileLike ? S(320) : 0;
+        const mobilePadOffset = isMobileLike ? S(345) : 0;
         // Подняли сейф отдельно (функционал проверки без ассетов тоже виден)
-        const mobileSafeLift = isMobileLike ? S(150) : 0;
+        const mobileLift = isMobileLike ? Math.round(HEIGHT * 0.253) : 0;
 
         // Верхняя панель
         const topRect = { x: S(40), y: S(26), w: WIDTH - S(80), h: S(84) };
@@ -963,7 +963,7 @@
         // Сейф
         drawSafe(
           WIDTH / 2,
-          HEIGHT / 2 + S(52) - mobileSafeLift,
+          HEIGHT / 2 + S(52) - mobileLift,
           openProgress,
           secretProgress,
           shakeX
@@ -972,7 +972,7 @@
         // Нижние элементы (подняты над mobile keypad)
         const codeBox = {
           x: WIDTH / 2 - S(245),
-          y: HEIGHT - S(106) - mobilePadOffset,
+          y: HEIGHT - S(106) - mobilePadOffset - mobileLift,
           w: S(490),
           h: S(46)
         };
@@ -989,7 +989,7 @@
           visible = "CODE:       " + maskedDigits(entered);
           color = COLORS.TEXT;
         }
-        drawText(visible, WIDTH / 2, HEIGHT - S(83) - mobilePadOffset, color, S(28), "center", "700");
+        drawText(visible, WIDTH / 2, HEIGHT - S(83) - mobilePadOffset - mobileLift, color, S(28), "center", "700");
 
         const hint = "Enter: подтвердить | Backspace: удалить | 1990/1991: режимы смены кода | R: сброс UI";
         if (!isMobileLike) {
@@ -997,9 +997,9 @@
         }
 
         if (appState === STATE.OPEN) {
-          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset, COLORS.TEXT, S(20), "center", "700");
+          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset - mobileLift, COLORS.TEXT, S(20), "center", "700");
         } else if (appState === STATE.SECRET_OPEN) {
-          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset, COLORS.TEXT, S(20), "center", "700");
+          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset - mobileLift, COLORS.TEXT, S(20), "center", "700");
         }
       }
 
