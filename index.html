@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Симулятор сейфа</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #11151c;
+      overflow: hidden;
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: #16181f;
+      image-rendering: auto;
+      touch-action: none;
+    }
+
+    .fallback {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #eee;
+      background: #111;
+      z-index: 50;
+      text-align: center;
+      padding: 24px;
+    }
+
+    /* Мобильная экранная клавиатура */
+    .mobile-controls {
+      position: fixed;
+      left: 50%;
+      bottom: 10px;
+      transform: translateX(-50%);
+      z-index: 20;
+      width: min(92vw, 420px);
+      display: none;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    .pad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .pad-actions {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .mobile-controls button {
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(24, 28, 36, 0.88);
+      color: #f1f4fa;
+      border-radius: 10px;
+      font: 700 20px Consolas, "Courier New", monospace;
+      padding: 14px 10px;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+
+    .mobile-controls button:active {
+      transform: scale(0.98);
+      background: rgba(40, 48, 62, 0.95);
+    }
+
+    @media (max-width: 900px), (pointer: coarse) {
+      .mobile-controls {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="app"></canvas>
+
+  <div id="mobileControls" class="mobile-controls">
+    <div class="pad-grid">
+      <button data-key="1">1</button>
+      <button data-key="2">2</button>
+      <button data-key="3">3</button>
+
+      <button data-key="4">4</button>
+      <button data-key="5">5</button>
+      <button data-key="6">6</button>
+
+      <button data-key="7">7</button>
+      <button data-key="8">8</button>
+      <button data-key="9">9</button>
+
+      <button data-key="back">⌫</button>
+      <button data-key="0">0</button>
+      <button data-key="enter">OK</button>
+    </div>
+    <div class="pad-actions">
+      <button data-key="reset">R</button>
+    </div>
+  </div>
+
+  <div class="fallback" id="fallback">Canvas не поддерживается. Поздравляю, вы открыли страницу на чем-то музейном.</div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("app");
+      const fallback = document.getElementById("fallback");
+      const mobileControls = document.getElementById("mobileControls");
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        fallback.style.display = "flex";
+        return;
+      }
+
+      // -----------------------------
+      // Базовые настройки
+      // -----------------------------
+      const BASE_W = 960;
+      const BASE_H = 640;
+      const MAX_DIGITS = 6;
+
+      const DEFAULT_MAIN_CODE = "472915";
+      const DEFAULT_SECRET_CODE = "314159";
+
+      const MASTER_SET_MAIN = "1990";
+      const MASTER_SET_SECRET = "1991";
+
+      // -----------------------------
+      // Состояния
+      // -----------------------------
+      const STATE = {
+        INPUT: "input",
+        SET_MAIN: "set_main",
+        SET_SECRET: "set_secret",
+        OPENING: "opening",
+        OPEN: "open",
+        SECRET_OPENING: "secret_opening",
+        SECRET_OPEN: "secret_open",
+        ERROR: "error",
+      };
+
+      // -----------------------------
+      // Цвета
+      // -----------------------------
+      const COLORS = {
+        BG: "#16181f",
+        GREEN: "#4ec971",
+        RED: "#dc5656",
+        YELLOW: "#ebd25a",
+        CYAN: "#6edceb",
+        TEXT: "#ebeef5",
+        DIM: "#aab0be",
+        ACCENT: "#d2b054",
+        PANEL_A: "#222631",
+        PANEL_B: "#4e5667",
+        PANEL_C: "#101218",
+      };
+
+      // -----------------------------
+      // Размеры/масштаб
+      // -----------------------------
+      let WIDTH = 0, HEIGHT = 0, uiScale = 1;
+      const SAFE_SCENE_SCALE = 0.55;
+
+      function S(v) {
+        return Math.max(1, Math.round(v * uiScale));
+      }
+
+      function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const rectW = window.innerWidth;
+        const rectH = window.innerHeight;
+
+        canvas.width = Math.floor(rectW * dpr);
+        canvas.height = Math.floor(rectH * dpr);
+        canvas.style.width = rectW + "px";
+        canvas.style.height = rectH + "px";
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        WIDTH = rectW;
+        HEIGHT = rectH;
+        uiScale = Math.min(WIDTH / BASE_W, HEIGHT / BASE_H);
+
+        rebuildBgPattern();
+      }
+
+      // -----------------------------
+      // Утилиты
+      // -----------------------------
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+      function easeOutCubic(t) {
+        t = clamp(t, 0, 1);
+        return 1 - Math.pow(1 - t, 3);
+      }
+
+      function easeOutQuad(t) {
+        t = clamp(t, 0, 1);
+        return 1 - (1 - t) * (1 - t);
+      }
+
+      function easeOutBack(t) {
+        t = clamp(t, 0, 1);
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+      }
+
+      function maskedDigits(s, total = MAX_DIGITS) {
+        const arr = [];
+        for (let i = 0; i < total; i++) arr.push(i < s.length ? "*" : "_");
+        return arr.join(" ");
+      }
+
+      function drawPixelFrame(x, y, w, h, fill, light, dark, border = 4) {
+        ctx.fillStyle = fill;
+        ctx.fillRect(x, y, w, h);
+
+        ctx.fillStyle = light;
+        ctx.fillRect(x, y, w, border);
+        ctx.fillRect(x, y, border, h);
+
+        ctx.fillStyle = dark;
+        ctx.fillRect(x, y + h - border, w, border);
+        ctx.fillRect(x + w - border, y, border, h);
+
+        ctx.fillStyle = dark;
+        ctx.fillRect(x, y, border, border);
+
+        ctx.fillStyle = light;
+        ctx.fillRect(x + w - border, y + h - border, border, border);
+      }
+
+      function drawText(text, x, y, color, px, align = "center", weight = "700") {
+        ctx.fillStyle = color;
+        ctx.font = `${weight} ${px}px Consolas, "Courier New", monospace`;
+        ctx.textAlign = align;
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, x, y);
+      }
+
+      function drawImageScaled(img, x, y, w, h) {
+        if (!img) return;
+        ctx.drawImage(img, x, y, w, h);
+      }
+
+      function drawImageRotated(img, cx, cy, w, h, angleDeg) {
+        if (!img) return;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate((angleDeg * Math.PI) / 180);
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
+
+      // -----------------------------
+      // Фон-сетка (кэш)
+      // -----------------------------
+      let bgPatternCanvas = null;
+
+      function rebuildBgPattern() {
+        bgPatternCanvas = document.createElement("canvas");
+        bgPatternCanvas.width = WIDTH;
+        bgPatternCanvas.height = HEIGHT;
+        const g = bgPatternCanvas.getContext("2d");
+
+        const cell = S(8);
+        for (let y = 0; y < HEIGHT; y += cell) {
+          for (let x = 0; x < WIDTH; x += cell) {
+            const even = ((((x / cell) | 0) + ((y / cell) | 0)) % 2) === 0;
+            g.fillStyle = even ? "#181a22" : "#15171e";
+            g.fillRect(x, y, cell, cell);
+          }
+        }
+      }
+
+      // -----------------------------
+      // localStorage (коды)
+      // -----------------------------
+      function loadCodes() {
+        const main = localStorage.getItem("safe_main_code") || DEFAULT_MAIN_CODE;
+        const secret = localStorage.getItem("safe_secret_code") || DEFAULT_SECRET_CODE;
+        const valid = (s) => typeof s === "string" && /^\d{6}$/.test(s);
+
+        return {
+          main: valid(main) ? main : DEFAULT_MAIN_CODE,
+          secret: valid(secret) ? secret : DEFAULT_SECRET_CODE
+        };
+      }
+
+      function saveCodes(main, secret) {
+        try {
+          localStorage.setItem("safe_main_code", main);
+          localStorage.setItem("safe_secret_code", secret);
+          return true;
+        } catch (e) {
+          console.warn("localStorage недоступен:", e);
+          return false;
+        }
+      }
+
+      let { main: MAIN_CODE, secret: SECRET_CODE } = loadCodes();
+
+      // -----------------------------
+      // Состояние приложения
+      // -----------------------------
+      let appState = STATE.INPUT;
+      let entered = "";
+      let message = "Введите 6-значный код";
+      let messageColor = COLORS.DIM;
+
+      let openProgress = 0;
+      let secretProgress = 0;
+
+      let shakeTimer = 0;
+      let errorFlash = 0;
+
+      let dialRotation = 0;
+      let dialSpinVelocity = 0;
+
+      let lastTime = performance.now();
+
+      // -----------------------------
+      // Ассеты
+      // -----------------------------
+      const assets = {
+        safe: null,
+        door: null,
+        handle: null,
+        dial: null,
+        pendant: null,
+      };
+
+      function loadImage(src) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = src;
+        });
+      }
+
+      function cleanPendantArtifacts(img) {
+        const c = document.createElement("canvas");
+        c.width = img.width;
+        c.height = img.height;
+        const g = c.getContext("2d");
+        g.drawImage(img, 0, 0);
+
+        const imageData = g.getImageData(0, 0, c.width, c.height);
+        const p = imageData.data;
+
+        for (let i = 0; i < p.length; i += 4) {
+          const r = p[i];
+          const gg = p[i + 1];
+          const b = p[i + 2];
+          const a = p[i + 3];
+          if (a === 0) continue;
+
+          const isColdArtifact =
+            a > 20 &&
+            gg > r + 10 &&
+            b > r + 10 &&
+            (gg + b) > 180;
+
+          if (isColdArtifact) {
+            p[i + 3] = 0;
+          }
+        }
+
+        g.putImageData(imageData, 0, 0);
+        return c;
+      }
+
+      async function loadAssets() {
+        try {
+          const [safe, door, handle, dial, pendant] = await Promise.all([
+            loadImage("assets/safe.png"),
+            loadImage("assets/door.png"),
+            loadImage("assets/ruchka.png"),
+            loadImage("assets/ruchka2.png"),
+            loadImage("assets/kulon.png"),
+          ]);
+
+          assets.safe = safe;
+          assets.door = door;
+          assets.handle = handle;
+          assets.dial = dial;
+          assets.pendant = cleanPendantArtifacts(pendant);
+        } catch (e) {
+          console.error("Ошибка загрузки ассетов:", e);
+        }
+      }
+
+      // -----------------------------
+      // Управление состоянием
+      // -----------------------------
+      function setError(text, shake = 0.45, flash = 0.35) {
+        appState = STATE.ERROR;
+        message = text;
+        messageColor = COLORS.RED;
+        shakeTimer = shake;
+        errorFlash = flash;
+      }
+
+      function resetUI() {
+        appState = STATE.INPUT;
+        entered = "";
+        message = "Введите 6-значный код";
+        messageColor = COLORS.DIM;
+        openProgress = 0;
+        secretProgress = 0;
+        shakeTimer = 0;
+        errorFlash = 0;
+        dialRotation = 0;
+        dialSpinVelocity = 0;
+      }
+
+      function leaveOpenToInput() {
+        appState = STATE.INPUT;
+        entered = "";
+        message = "Введите 6-значный код";
+        messageColor = COLORS.DIM;
+        openProgress = 0;
+        secretProgress = 0;
+      }
+
+      // -----------------------------
+      // Кэш масштабов кулона под нишу
+      // -----------------------------
+      const pendantCache = new Map();
+
+      function getScaledPendantForNiche(targetH) {
+        targetH = Math.max(1, targetH | 0);
+        if (pendantCache.has(targetH)) return pendantCache.get(targetH);
+
+        const img = assets.pendant;
+        if (!img) return null;
+
+        const ratio = img.width / img.height;
+        const h = targetH;
+        const w = Math.max(1, Math.round(h * ratio));
+
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const g = c.getContext("2d");
+        g.drawImage(img, 0, 0, w, h);
+
+        pendantCache.set(targetH, c);
+        return c;
+      }
+
+      // -----------------------------
+      // Рисование сейфа
+      // -----------------------------
+      function drawFallbackSafe(cx, cy) {
+        const w = Math.round(S(300));
+        const h = Math.round(S(300));
+        const x = Math.round(cx - w / 2);
+        const y = Math.round(cy - h / 2);
+
+        ctx.fillStyle = "#c99";
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = "#543";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        ctx.fillStyle = "#f3c24d";
+        ctx.fillRect(x + w * 0.35, y + h * 0.35, w * 0.30, h * 0.30);
+      }
+
+      function drawSafe(centerX, centerY, doorOpenAmount, secretOpenAmount, shakeX = 0) {
+        if (!assets.safe || !assets.door || !assets.handle || !assets.dial || !assets.pendant) {
+          drawFallbackSafe(centerX + shakeX, centerY);
+          return;
+        }
+
+        const cx = centerX + shakeX;
+        const cy = centerY;
+
+        const safeW = Math.round(S(840) * SAFE_SCENE_SCALE);
+        const safeH = Math.round(S(840) * SAFE_SCENE_SCALE);
+        const doorW0 = safeW;
+        const doorH0 = safeH;
+        const handleW0 = Math.round(S(240) * SAFE_SCENE_SCALE);
+        const handleH0 = Math.round(S(240) * SAFE_SCENE_SCALE);
+        const dialW0 = Math.round(S(170) * SAFE_SCENE_SCALE);
+        const dialH0 = Math.round(S(170) * SAFE_SCENE_SCALE);
+
+        const bx = Math.round(cx - safeW / 2);
+        const by = Math.round(cy - safeH / 2);
+
+        // Тень сейфа
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.beginPath();
+        ctx.ellipse(
+          bx + safeW / 2 + S(6),
+          by + safeH - S(8),
+          safeW / 2.1,
+          S(14),
+          0, 0, Math.PI * 2
+        );
+        ctx.fill();
+
+        // Корпус сейфа
+        drawImageScaled(assets.safe, bx, by, safeW, safeH);
+
+        // Локальные позиции элементов на дверце
+        const dialLocalX = Math.round(doorW0 * 0.315);
+        const dialLocalY = Math.round(doorH0 * 0.135);
+        const handleLocalX = Math.round(doorW0 * 0.305);
+        const handleLocalY = Math.round(doorH0 * 0.425);
+
+        // Анимация двери (открытие вправо на петлях)
+        const tOpen = easeOutCubic(doorOpenAmount);
+        const minDoorW = Math.max(S(12), Math.round(doorW0 * 0.035));
+        const curDoorW = Math.max(1, Math.round(doorW0 - (doorW0 - minDoorW) * tOpen));
+        const depthShift = Math.round(doorW0 * 0.22 * easeOutQuad(doorOpenAmount));
+
+        const hingeRightX = bx + doorW0 + depthShift;
+        const doorX = hingeRightX - curDoorW;
+        const doorY = by;
+
+        // Боковая грань двери
+        if (doorOpenAmount > 0.02) {
+          const sideTop = by + S(10);
+          const sideBottom = by + doorH0 - S(10);
+          const bodyHingeX = bx + doorW0 - S(2);
+          const frontHingeX = hingeRightX;
+
+          ctx.beginPath();
+          ctx.moveTo(bodyHingeX, sideTop);
+          ctx.lineTo(frontHingeX, sideTop + S(6));
+          ctx.lineTo(frontHingeX, sideBottom - S(6));
+          ctx.lineTo(bodyHingeX, sideBottom);
+          ctx.closePath();
+          ctx.fillStyle = "#605c6e";
+          ctx.fill();
+          ctx.strokeStyle = "#3a3644";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          ctx.strokeStyle = "rgba(200,200,220,0.35)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(frontHingeX - S(2), sideTop + S(7));
+          ctx.lineTo(frontHingeX - S(2), sideBottom - S(7));
+          ctx.stroke();
+        }
+
+        // Фронт двери
+        drawImageScaled(assets.door, doorX, doorY, curDoorW, doorH0);
+
+        function mapDoorLocal(localX, localY) {
+          return {
+            x: Math.round(doorX + localX * (curDoorW / Math.max(1, doorW0))),
+            y: Math.round(doorY + localY)
+          };
+        }
+
+        const doorVisibleEnough = curDoorW > Math.max(S(22), Math.round(doorW0 * 0.06));
+        if (!doorVisibleEnough) return;
+
+        const handleBase = mapDoorLocal(handleLocalX, handleLocalY);
+        const dialBase = mapDoorLocal(dialLocalX, dialLocalY);
+
+        // Перспективное уменьшение элементов на двери
+        const doorPersp = curDoorW / Math.max(1, doorW0);
+        const elementScale = clamp(0.42 + 0.58 * doorPersp, 0.42, 1.0);
+
+        const curHandleW = Math.max(S(14), Math.round(handleW0 * elementScale));
+        const curHandleH = Math.max(S(14), Math.round(handleH0 * elementScale));
+        const curDialW = Math.max(S(14), Math.round(dialW0 * elementScale));
+        const curDialH = Math.max(S(14), Math.round(dialH0 * elementScale));
+
+        // ruchka2 (декоративный циферблат)
+        let dialAnimAngle = dialRotation;
+        if (appState === STATE.OPENING) dialAnimAngle += -8 * doorOpenAmount;
+        else if (appState === STATE.SECRET_OPENING) dialAnimAngle += 6 * secretOpenAmount;
+        else if (appState === STATE.ERROR) dialAnimAngle += Math.sin(performance.now() * 0.03) * 2;
+
+        drawImageRotated(
+          assets.dial,
+          dialBase.x + curDialW / 2,
+          dialBase.y + curDialH / 2,
+          curDialW, curDialH,
+          dialAnimAngle
+        );
+
+        // Тайник за ручкой (вернули нишу)
+        if (secretOpenAmount > 0.03) {
+          const nicheW = Math.max(S(26), Math.round(curHandleW * 0.40));
+          const nicheH = Math.max(S(40), Math.round(curHandleH * 0.56));
+          const nicheX = handleBase.x + Math.round(curHandleW * 0.60);
+          const nicheY = handleBase.y + Math.round(curHandleH * 0.24);
+
+          // Рамка ниши
+          const border = Math.max(2, S(2));
+          drawPixelFrame(nicheX, nicheY, nicheW, nicheH, "#1a1e26", "#46505e", "#0a0c12", border);
+
+          // Внутренность ниши
+          const innerPad = Math.max(2, S(3));
+          const innerX = nicheX + innerPad;
+          const innerY = nicheY + innerPad;
+          const innerW = nicheW - innerPad * 2;
+          const innerH = nicheH - innerPad * 2;
+
+          ctx.fillStyle = "#0a0c12";
+          ctx.fillRect(innerX, innerY, innerW, innerH);
+
+          ctx.strokeStyle = "#2a2f38";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(innerX + 0.5, innerY + 0.5, innerW - 1, innerH - 1);
+
+          // Мягкая "бархатная" подложка
+          ctx.fillStyle = "rgba(26,18,22,0.38)";
+          ctx.fillRect(innerX, innerY, innerW, innerH);
+
+          // Верхний внутренний блик
+          ctx.fillStyle = "rgba(120,120,140,0.08)";
+          ctx.fillRect(innerX, innerY, innerW, Math.max(2, Math.round(innerH * 0.22)));
+
+          // Кулон
+          if (secretOpenAmount > 0.12) {
+            const reveal = clamp((secretOpenAmount - 0.12) / 0.88, 0, 1);
+
+            const pendantImg = getScaledPendantForNiche(Math.max(S(34), innerH - S(6)));
+            if (pendantImg) {
+              const pw = pendantImg.width;
+              const ph = pendantImg.height;
+
+              const pendX = nicheX + Math.round((nicheW - pw) / 2);
+              const pendY = nicheY + S(2) + Math.round((1 - reveal) * S(7));
+
+              // Тень под кулоном
+              ctx.fillStyle = "rgba(0,0,0,0.22)";
+              ctx.beginPath();
+              ctx.ellipse(
+                nicheX + nicheW / 2,
+                nicheY + nicheH - S(5),
+                Math.max(S(8), pw * 0.32),
+                Math.max(S(3), ph * 0.07),
+                0, 0, Math.PI * 2
+              );
+              ctx.fill();
+
+              const bob = (appState === STATE.SECRET_OPEN)
+                ? Math.round(Math.sin(performance.now() * 0.004) * Math.max(1, S(1)))
+                : 0;
+
+              drawImageScaled(pendantImg, pendX, pendY + bob, pw, ph);
+            }
+          }
+
+          // Направляющая механизма
+          const railW = Math.max(S(4), Math.round(curHandleW * 0.05));
+          const railH = Math.max(S(16), Math.round(curHandleH * 0.22));
+          const railX = handleBase.x + Math.round(curHandleW * 0.74);
+          const railY = handleBase.y + Math.round(curHandleH * 0.43);
+
+          ctx.fillStyle = "#3a404c";
+          ctx.fillRect(railX, railY, railW, railH);
+          ctx.strokeStyle = "#22262e";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(railX + 0.5, railY + 0.5, railW - 1, railH - 1);
+        }
+
+        // Ручка (всегда на двери)
+        const sp = easeOutBack(secretOpenAmount);
+        const handleShift = Math.round(curHandleW * 0.62 * sp);
+        const handleX = handleBase.x - handleShift;
+        const handleY = handleBase.y;
+
+        let handleAngle = 12 * secretOpenAmount;
+        if (appState === STATE.OPENING) handleAngle += -6 * doorOpenAmount;
+
+        drawImageRotated(
+          assets.handle,
+          handleX + curHandleW / 2,
+          handleY + curHandleH / 2,
+          curHandleW, curHandleH,
+          handleAngle
+        );
+      }
+
+      // -----------------------------
+      // Управление кнопками / клавишами
+      // -----------------------------
+      function handleVirtualKey(key) {
+        if (key === "reset") {
+          resetUI();
+          return;
+        }
+
+        // Из открытых состояний цифра возвращает к вводу
+        if (appState === STATE.OPEN || appState === STATE.SECRET_OPEN) {
+          if (/^\d$/.test(key)) {
+            leaveOpenToInput();
+          } else if (key !== "reset") {
+            return;
+          }
+        }
+
+        if (![STATE.INPUT, STATE.SET_MAIN, STATE.SET_SECRET, STATE.ERROR].includes(appState)) {
+          return;
+        }
+
+        if (key === "enter") {
+          // Установка основного кода
+          if (appState === STATE.SET_MAIN) {
+            if (entered.length !== MAX_DIGITS) {
+              setError("Основной код должен быть 6-значным", 0.2, 0.2);
+            } else {
+              if (saveCodes(entered, SECRET_CODE)) {
+                MAIN_CODE = entered;
+                entered = "";
+                appState = STATE.INPUT;
+                message = "Основной код сохранен";
+                messageColor = COLORS.GREEN;
+              } else {
+                setError("Ошибка сохранения", 0.2, 0.2);
+              }
+            }
+            return;
+          }
+
+          // Установка второго кода
+          if (appState === STATE.SET_SECRET) {
+            if (entered.length !== MAX_DIGITS) {
+              setError("Второй код должен быть 6-значным", 0.2, 0.2);
+            } else {
+              if (saveCodes(MAIN_CODE, entered)) {
+                SECRET_CODE = entered;
+                entered = "";
+                appState = STATE.INPUT;
+                message = "Второй код тайника сохранен";
+                messageColor = COLORS.CYAN;
+              } else {
+                setError("Ошибка сохранения", 0.2, 0.2);
+              }
+            }
+            return;
+          }
+
+          // Обычный режим / мастер-коды
+          if (appState === STATE.INPUT || appState === STATE.ERROR) {
+            if (entered === MASTER_SET_MAIN) {
+              appState = STATE.SET_MAIN;
+              entered = "";
+              message = "1990: введите новый 6-значный ОСНОВНОЙ код";
+              messageColor = COLORS.YELLOW;
+              return;
+            }
+
+            if (entered === MASTER_SET_SECRET) {
+              appState = STATE.SET_SECRET;
+              entered = "";
+              message = "1991: введите новый 6-значный ВТОРОЙ код";
+              messageColor = COLORS.CYAN;
+              return;
+            }
+
+            if (entered.length !== MAX_DIGITS) {
+              setError("Нужно ввести 6 цифр", 0.2, 0.2);
+              return;
+            }
+
+            if (entered === MAIN_CODE) {
+              appState = STATE.OPENING;
+              message = "Код принят";
+              messageColor = COLORS.GREEN;
+              return;
+            }
+
+            if (entered === SECRET_CODE) {
+              appState = STATE.SECRET_OPENING;
+              message = "Второй код принят: скрытый тайник";
+              messageColor = COLORS.CYAN;
+              return;
+            }
+
+            setError("Неверная комбинация");
+          }
+          return;
+        }
+
+        if (key === "back") {
+          entered = entered.slice(0, -1);
+          if (appState === STATE.ERROR) {
+            appState = STATE.INPUT;
+            message = "Введите 6-значный код";
+            messageColor = COLORS.DIM;
+          }
+          return;
+        }
+
+        if (/^\d$/.test(key) && entered.length < MAX_DIGITS) {
+          entered += key;
+
+          // вращение ruchka2 при вводе цифры
+          dialSpinVelocity += (appState !== STATE.ERROR ? 85 : 55);
+
+          if (appState === STATE.ERROR) {
+            appState = STATE.INPUT;
+            message = "Введите 6-значный код";
+            messageColor = COLORS.DIM;
+          }
+        }
+      }
+
+      // Десктопная клавиатура
+      window.addEventListener("keydown", (e) => {
+        const key = e.key;
+
+        if (key === "Escape") return;
+
+        if (key === "Enter") {
+          e.preventDefault();
+          handleVirtualKey("enter");
+          return;
+        }
+
+        if (key === "Backspace") {
+          e.preventDefault();
+          handleVirtualKey("back");
+          return;
+        }
+
+        if (key.toLowerCase() === "r") {
+          e.preventDefault();
+          handleVirtualKey("reset");
+          return;
+        }
+
+        if (/^\d$/.test(key)) {
+          e.preventDefault();
+          handleVirtualKey(key);
+        }
+      });
+
+      // Мобильные кнопки
+      mobileControls.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-key]");
+        if (!btn) return;
+        handleVirtualKey(btn.dataset.key);
+      });
+
+      mobileControls.addEventListener("touchstart", () => {}, { passive: true });
+
+      // -----------------------------
+      // Update / Draw loop
+      // -----------------------------
+      function update(dt) {
+        // Вращение ruchka2 (затухание)
+        dialRotation = (dialRotation + dialSpinVelocity * dt) % 360;
+        dialSpinVelocity *= 0.90;
+        if (Math.abs(dialSpinVelocity) < 0.05) dialSpinVelocity = 0;
+
+        if (appState === STATE.OPENING) {
+          openProgress += dt * 0.60;
+          if (openProgress >= 1) {
+            openProgress = 1;
+            appState = STATE.OPEN;
+            message = "Сейф открыт. R - сброс интерфейса";
+            messageColor = COLORS.GREEN;
+          }
+        }
+
+        if (appState === STATE.SECRET_OPENING) {
+          secretProgress += dt * 0.85;
+          if (secretProgress >= 1) {
+            secretProgress = 1;
+            appState = STATE.SECRET_OPEN;
+            message = "Вы нашли кулон в тайнике!";
+            messageColor = COLORS.CYAN;
+          }
+        }
+
+        if (appState === STATE.ERROR) {
+          if (shakeTimer > 0) shakeTimer = Math.max(0, shakeTimer - dt);
+          if (errorFlash > 0) errorFlash = Math.max(0, errorFlash - dt);
+        }
+
+        // Взаимно исключаем анимации
+        if ([STATE.INPUT, STATE.SET_MAIN, STATE.SET_SECRET, STATE.ERROR].includes(appState)) {
+          openProgress = Math.max(0, openProgress - dt * 1.2);
+          secretProgress = Math.max(0, secretProgress - dt * 1.6);
+        } else if ([STATE.OPENING, STATE.OPEN].includes(appState)) {
+          secretProgress = Math.max(0, secretProgress - dt * 2.0);
+        } else if ([STATE.SECRET_OPENING, STATE.SECRET_OPEN].includes(appState)) {
+          openProgress = Math.max(0, openProgress - dt * 2.0);
+        }
+      }
+
+      function draw() {
+        // Фон
+        if (bgPatternCanvas) {
+          ctx.drawImage(bgPatternCanvas, 0, 0);
+        } else {
+          ctx.fillStyle = COLORS.BG;
+          ctx.fillRect(0, 0, WIDTH, HEIGHT);
+        }
+
+        const isMobileLike = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+        const mobilePadOffset = isMobileLike ? S(345) : 0;
+        const mobileLift = isMobileLike ? Math.round(HEIGHT * 0.253) : 0;
+
+        // Верхняя панель
+        const topRect = { x: S(40), y: S(26), w: WIDTH - S(80), h: S(84) };
+        drawPixelFrame(topRect.x, topRect.y, topRect.w, topRect.h, COLORS.PANEL_A, COLORS.PANEL_B, COLORS.PANEL_C, S(4));
+
+        const titleY = topRect.y + Math.round(topRect.h * 0.32);
+        const msgY = topRect.y + Math.round(topRect.h * 0.70);
+
+        drawText("СИМУЛЯТОР СЕЙФА", WIDTH / 2, titleY, COLORS.ACCENT, S(28), "center", "700");
+        drawText(message, WIDTH / 2, msgY, messageColor, S(18), "center", "700");
+
+        // Shake
+        let shakeX = 0;
+        if (shakeTimer > 0) {
+          const amp = Math.max(1, Math.round(S(10) * Math.min(1, shakeTimer / 0.45)));
+          shakeX = Math.round(Math.sin(performance.now() * 0.06) * amp);
+        }
+
+        // Красная вспышка
+        if (errorFlash > 0) {
+          ctx.fillStyle = `rgba(255,50,50,${0.28 * Math.min(1, errorFlash / 0.35)})`;
+          ctx.fillRect(0, 0, WIDTH, HEIGHT);
+        }
+
+        // Сейф
+        drawSafe(
+          WIDTH / 2,
+          HEIGHT / 2 + S(52) - mobileLift,
+          openProgress,
+          secretProgress,
+          shakeX
+        );
+
+        // Поле ввода
+        const codeBox = {
+          x: WIDTH / 2 - S(245),
+          y: HEIGHT - S(106) - mobilePadOffset - mobileLift,
+          w: S(490),
+          h: S(46)
+        };
+        drawPixelFrame(codeBox.x, codeBox.y, codeBox.w, codeBox.h, "#20242e", "#505868", "#12141b", S(4));
+
+        let visible, color;
+        if (appState === STATE.SET_MAIN) {
+          visible = "MAIN SET:   " + maskedDigits(entered);
+          color = COLORS.YELLOW;
+        } else if (appState === STATE.SET_SECRET) {
+          visible = "SECRET SET: " + maskedDigits(entered);
+          color = COLORS.CYAN;
+        } else {
+          visible = "CODE:       " + maskedDigits(entered);
+          color = COLORS.TEXT;
+        }
+
+        drawText(visible, WIDTH / 2, HEIGHT - S(83) - mobilePadOffset - mobileLift, color, S(28), "center", "700");
+
+        // Подсказка (на мобиле скрываем)
+        const hint = "Enter: подтвердить | Backspace: удалить | 1990/1991: режимы смены кода | R: сброс UI";
+        if (!isMobileLike) {
+          drawText(hint, WIDTH / 2, HEIGHT - S(30), COLORS.DIM, S(14), "center", "700");
+        }
+
+        // Отладочная инфа
+        if (appState === STATE.OPEN) {
+          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset - mobileLift, COLORS.TEXT, S(20), "center", "700");
+        } else if (appState === STATE.SECRET_OPEN) {
+          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, HEIGHT - S(132) - mobilePadOffset - mobileLift, COLORS.TEXT, S(20), "center", "700");
+        }
+      }
+
+      function frame(now) {
+        const dt = Math.min(0.033, (now - lastTime) / 1000);
+        lastTime = now;
+
+        update(dt);
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      // -----------------------------
+      // Инициализация
+      // -----------------------------
+      window.addEventListener("resize", resize);
+      resize();
+
+      loadAssets().finally(() => {
+        requestAnimationFrame(frame);
+      });
+    })();
+  </script>
+</body>
+</html>
