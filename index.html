@@ -194,7 +194,12 @@
       // -----------------------------
       let WIDTH = 0, HEIGHT = 0, uiScale = 1;
       const SAFE_SCENE_SCALE = 0.55;
+
+      // Мобильные настройки компоновки (можно крутить одной цифрой)
       const MOBILE_VISUAL_BOOST = 1.18; // увеличение сейфа/текстов/полей на мобиле (кнопки не трогаем)
+      const MOBILE_KEYPAD_GAP = 14;     // зазор между нижней полосой и мобильной клавиатурой (в базовых единицах S)
+      const MOBILE_SAFE_Y_BIAS = 10;    // дополнительный сдвиг сейфа по Y на мобиле (+ вниз, - вверх), в базовых единицах S
+      const MOBILE_CODEBOX_TOP_GAP = 12; // минимальный отступ нижней полосы от верхней панели на мобиле (в базовых единицах S)
 
       function S(v) {
         return Math.max(1, Math.round(v * uiScale));
@@ -936,15 +941,14 @@
         }
 
         const isMobileLike = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
-        // Подняли нижний UI выше, чтобы был над экранной клавиатурой
-        const mobilePadOffset = isMobileLike ? S(360) : 0;
-        // Подняли сейф отдельно (функционал проверки без ассетов тоже виден)
-        const mobileSafeLift = isMobileLike ? S(195) : 0;
         const V = (v) => isMobileLike ? Math.max(1, Math.round(S(v) * MOBILE_VISUAL_BOOST)) : S(v);
-        const visualScale = isMobileLike ? MOBILE_VISUAL_BOOST : 1;
 
         // Верхняя панель
         const topRect = { x: S(40), y: S(26), w: WIDTH - S(80), h: S(84) };
+
+        // Положение мобильной клавиатуры берём из DOM (а не гадаем коэффициентами)
+        const mobileRect = isMobileLike ? mobileControls.getBoundingClientRect() : null;
+        const keypadTop = (isMobileLike && mobileRect) ? mobileRect.top : HEIGHT;
         drawPixelFrame(topRect.x, topRect.y, topRect.w, topRect.h, COLORS.PANEL_A, COLORS.PANEL_B, COLORS.PANEL_C, V(4));
 
         const titleY = topRect.y + Math.round(topRect.h * 0.32);
@@ -965,19 +969,28 @@
           ctx.fillRect(0, 0, WIDTH, HEIGHT);
         }
 
-        // Сейф
+        // Нижняя полоса: на мобиле ставим строго НАД клавиатурой
+        const codeBoxGap = isMobileLike ? S(MOBILE_KEYPAD_GAP) : 0;
+        const codeBoxY = isMobileLike
+          ? Math.max(topRect.y + topRect.h + S(MOBILE_CODEBOX_TOP_GAP), Math.round(keypadTop - V(46) - codeBoxGap))
+          : HEIGHT - V(106);
+
+        // Сейф: на мобиле центрируем в доступном пространстве между верхней панелью и нижней полосой
+        const safeCenterY = isMobileLike
+          ? Math.round((topRect.y + topRect.h + codeBoxY) / 2 + S(MOBILE_SAFE_Y_BIAS))
+          : HEIGHT / 2 + S(52);
+
         drawSafe(
           WIDTH / 2,
-          HEIGHT / 2 + S(52) - mobileSafeLift,
+          safeCenterY,
           openProgress,
           secretProgress,
           shakeX
         );
 
-        // Нижние элементы (подняты над mobile keypad)
         const codeBox = {
           x: WIDTH / 2 - V(245),
-          y: HEIGHT - V(106) - mobilePadOffset,
+          y: codeBoxY,
           w: V(490),
           h: V(46)
         };
@@ -994,7 +1007,7 @@
           visible = "CODE:       " + maskedDigits(entered);
           color = COLORS.TEXT;
         }
-        drawText(visible, WIDTH / 2, HEIGHT - V(83) - mobilePadOffset, color, V(28), "center", "700");
+        drawText(visible, WIDTH / 2, codeBoxY + Math.round(codeBox.h / 2), color, V(28), "center", "700");
 
         const hint = "Enter: подтвердить | Backspace: удалить | 1990/1991: режимы смены кода | R: сброс UI";
         if (!isMobileLike) {
@@ -1002,9 +1015,9 @@
         }
 
         if (appState === STATE.OPEN) {
-          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, HEIGHT - V(132) - mobilePadOffset, COLORS.TEXT, V(20), "center", "700");
+          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, codeBoxY - V(26), COLORS.TEXT, V(20), "center", "700");
         } else if (appState === STATE.SECRET_OPEN) {
-          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, HEIGHT - V(132) - mobilePadOffset, COLORS.TEXT, V(20), "center", "700");
+          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, codeBoxY - V(26), COLORS.TEXT, V(20), "center", "700");
         }
       }
 
