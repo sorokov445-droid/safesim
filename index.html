@@ -1009,15 +1009,15 @@
         }
         drawText(visible, WIDTH / 2, codeBoxY + Math.round(codeBox.h / 2), color, V(28), "center", "700");
 
-        const hint = "Enter: подтвердить | Backspace: удалить | 1990/1991: режимы смены кода | R: сброс UI";
+        const hint = "Enter: подтвердить | Backspace: удалить | R: сброс";
         if (!isMobileLike) {
           drawText(hint, WIDTH / 2, HEIGHT - V(30), COLORS.DIM, V(14), "center", "700");
         }
 
         if (appState === STATE.OPEN) {
-          drawText(`MAIN CODE: ${MAIN_CODE}`, WIDTH / 2, codeBoxY - V(26), COLORS.TEXT, V(20), "center", "700");
+          drawText(`КОД: ${MAIN_CODE}`, WIDTH / 2, codeBoxY - V(26), COLORS.TEXT, V(20), "center", "700");
         } else if (appState === STATE.SECRET_OPEN) {
-          drawText(`SECRET CODE: ${SECRET_CODE}`, WIDTH / 2, codeBoxY - V(26), COLORS.TEXT, V(20), "center", "700");
+          drawText(`СЕКРЕТНЫЙ КОД: ${SECRET_CODE}`, WIDTH / 2, codeBoxY - V(26), COLORS.TEXT, V(20), "center", "700");
         }
       }
 
